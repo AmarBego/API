@@ -15,7 +15,7 @@ const port = process.env.PORT || 3000;
 app.use(cors({
   origin: process.env.FRONTEND_URL_PORTFOLIO.split(','),
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type']
+  allowedHeaders: ['Content-Type', 'X-API-Key']
 }));
 
 app.use(express.json());
@@ -34,8 +34,23 @@ async function connectToDatabase() {
     process.exit(1);
   }
 }
+
+// API Key middleware
+const apiAuth = (req, res, next) => {
+  const apiKey = req.header('X-API-Key');
+  if (apiKey !== process.env.API_KEY) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  next();
+};
+
 // WebSocket connection handler
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
+  const apiKey = new URL(req.url, 'http://localhost').searchParams.get('apiKey');
+  if (apiKey !== process.env.API_KEY) {
+    ws.close(1008, 'Unauthorized');
+    return;
+  }
   console.log('New WebSocket client connected');
   
   ws.on('close', () => {
@@ -53,7 +68,7 @@ function broadcast(data) {
 }
 
 // Users endpoint (excluding password)
-app.post('/api/users', async (req, res) => {
+app.post('/api/users', apiAuth, async (req, res) => {
   try {
     const newUser = await db.collection('users').insertOne(req.body);
     const user = await db.collection('users').findOne({ _id: newUser.insertedId }, { projection: { password: 0 } });
@@ -66,7 +81,7 @@ app.post('/api/users', async (req, res) => {
 });
 
 // Transactions endpoint
-app.post('/api/transactions', async (req, res) => {
+app.post('/api/transactions', apiAuth, async (req, res) => {
   try {
     const newTransaction = await db.collection('transactions').insertOne(req.body);
     const transaction = await db.collection('transactions').findOne({ _id: newTransaction.insertedId });
@@ -78,14 +93,14 @@ app.post('/api/transactions', async (req, res) => {
   }
 });
 
-app.post('/api/broadcast', (req, res) => {
+app.post('/api/broadcast', apiAuth, (req, res) => {
   broadcast(req.body);
   console.log('Broadcast sent to all clients');
   res.status(200).json({ message: 'Broadcast sent' });
 });
 
 // Update user
-app.put('/api/users/:id', async (req, res) => {
+app.put('/api/users/:id', apiAuth, async (req, res) => {
   try {
     const result = await db.collection('users').findOneAndUpdate(
       { _id: new ObjectId(req.params.id) },
@@ -105,7 +120,7 @@ app.put('/api/users/:id', async (req, res) => {
 });
 
 // Users endpoint (excluding password)
-app.get('/api/users', async (req, res) => {
+app.get('/api/users', apiAuth, async (req, res) => {
   try {
     const users = await db.collection('users')
       .find({}, { projection: { password: 0 } })
@@ -118,7 +133,7 @@ app.get('/api/users', async (req, res) => {
 });
 
 // Single user endpoint (excluding password)
-app.get('/api/users/:id', async (req, res) => {
+app.get('/api/users/:id', apiAuth, async (req, res) => {
   try {
     const user = await db.collection('users').findOne(
       { _id: new ObjectId(req.params.id) },
@@ -136,7 +151,7 @@ app.get('/api/users/:id', async (req, res) => {
 });
 
 // Transactions for a specific user
-app.get('/api/users/:id/transactions', async (req, res) => {
+app.get('/api/users/:id/transactions', apiAuth, async (req, res) => {
   try {
     const userId = req.params.id;
     let query;
